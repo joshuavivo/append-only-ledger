@@ -110,5 +110,34 @@ class TamperEvidence(unittest.TestCase):
             l.verify()
 
 
+class Reconcile(unittest.TestCase):
+    def setUp(self):
+        self.l = Ledger()
+        e = self.l.post("acct_1", 5000, "charge-1")
+        self.l.post("acct_1", 700, "charge-2")
+        self.l.reverse(e["id"], "refund-1")
+
+    def test_matching_statement_reports_nothing(self):
+        r = self.l.reconcile([("charge-1", 5000), ("charge-2", 700), ("refund-1", -5000)])
+        self.assertEqual(r, {"missing_in_ledger": [], "missing_in_statement": [], "amount_mismatch": [],
+                             "duplicate_in_statement": [], "difference_cents": 0})
+
+    def test_each_kind_of_mismatch_is_listed(self):
+        r = self.l.reconcile([("charge-1", 5000), ("charge-2", 750), ("charge-2", 750), ("charge-9", 100)])
+        self.assertEqual(r["missing_in_ledger"], ["charge-9"])
+        self.assertEqual(r["missing_in_statement"], ["refund-1"])
+        self.assertEqual(r["amount_mismatch"], [("charge-2", 700, 750)])
+        self.assertEqual(r["duplicate_in_statement"], ["charge-2"])
+        self.assertEqual(r["difference_cents"], 700 - (5000 + 750 + 750 + 100))
+
+    def test_reconcile_writes_nothing_and_can_filter_by_account(self):
+        self.l.post("acct_2", 1200, "charge-3")
+        before = self.l.entries()
+        r = self.l.reconcile([("charge-3", 1200)], account="acct_2")
+        self.assertEqual(r["missing_in_statement"], [])
+        self.assertEqual(r["difference_cents"], 0)
+        self.assertEqual(self.l.entries(), before)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -4,7 +4,7 @@ A small ledger where money records are never edited and never deleted. A mistake
 adding a reversal row that points at the original, so the history always shows what happened
 and what was done about it.
 
-I built this to show the rule I use on payment systems, in about 140 lines of Python and SQLite.
+I built this to show how I think money records should be kept, in about 160 lines of Python and SQLite.
 
 ## What it guarantees
 
@@ -16,6 +16,7 @@ I built this to show the rule I use on payment systems, in about 140 lines of Py
 | A retried request writes once | Unique idempotency key; the retry gets the first result back |
 | A key reused for a different request is refused | Checked inside the write transaction |
 | Amounts are whole minor units | Floats, booleans, strings and zero are refused |
+| Differences from an external statement are listed, never auto-fixed | `reconcile()` reports missing rows, amount mismatches and duplicates, and writes nothing |
 | Edits made after removing the triggers are detected | Each row stores a hash of itself and the previous row; `verify()` recomputes the chain |
 
 ## Use
@@ -28,6 +29,7 @@ charge = ledger.post("acct_1", 5000, idempotency_key="charge-1", memo="order 1")
 ledger.reverse(charge["id"], idempotency_key="reverse-1", reason="charged twice")
 ledger.balance("acct_1")   # 0, with both rows still on record
 ledger.verify()            # 2 rows checked
+ledger.reconcile([("charge-1", 5000)])   # lists reverse-1 as missing from the statement
 ```
 
 ## Tests
@@ -36,7 +38,7 @@ ledger.verify()            # 2 rows checked
 python3 -m unittest discover -s tests
 ```
 
-Thirteen tests. Several of them go around the module and write to the database directly, to
+Sixteen tests. Several of them go around the module and write to the database directly, to
 prove the rules live in the database and not only in the Python.
 
 ## Limits

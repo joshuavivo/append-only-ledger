@@ -100,6 +100,29 @@ class Ledger:
             prev, count, last_id = r["hash"], count + 1, r["id"]
         return count
 
+    def reconcile(self, statement, account=None):
+        """Compare the ledger with an external statement (a bank or processor export).
+
+        statement is a list of (reference, amount_cents) pairs, where reference is the
+        idempotency key the entry was posted with. Nothing is written: differences are
+        reported for a person to resolve with new entries. Returns a dict of four lists
+        and the difference in totals (ledger minus statement).
+        """
+        ours = {e["idempotency_key"]: e["amount_cents"] for e in self.entries(account)}
+        theirs, duplicates = {}, []
+        for reference, amount in statement:
+            if reference in theirs:
+                duplicates.append(reference)
+            else:
+                theirs[reference] = amount
+        return {
+            "missing_in_ledger": sorted(k for k in theirs if k not in ours),
+            "missing_in_statement": sorted(k for k in ours if k not in theirs),
+            "amount_mismatch": sorted((k, ours[k], theirs[k]) for k in ours if k in theirs and ours[k] != theirs[k]),
+            "duplicate_in_statement": sorted(set(duplicates)),
+            "difference_cents": sum(ours.values()) - sum(amount for _, amount in statement),
+        }
+
     def _append(self, account, amount_cents, reverses, key, memo):
         if isinstance(amount_cents, bool) or not isinstance(amount_cents, int):
             raise LedgerError("amount_cents must be an integer number of minor units, never a float")
