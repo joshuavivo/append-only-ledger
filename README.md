@@ -4,7 +4,7 @@ A small ledger where money records are never edited and never deleted. A mistake
 adding a reversal row that points at the original, so the history always shows what happened
 and what was done about it.
 
-I built this to show how I think money records should be kept, in about 160 lines of Python and SQLite.
+I built this to show how I think money records should be kept, in one small file of Python and SQLite.
 
 ## What it guarantees
 
