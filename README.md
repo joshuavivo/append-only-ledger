@@ -30,16 +30,22 @@ ledger.reverse(charge["id"], idempotency_key="reverse-1", reason="charged twice"
 ledger.balance("acct_1")   # 0, with both rows still on record
 ledger.verify()            # 2 rows checked
 ledger.reconcile([("charge-1", 5000)])   # lists reverse-1 as missing from the statement
+ledger.close()             # or use `with Ledger("payments.db") as ledger: ...`
 ```
+
+How the three enforcement layers fit together, the write-path concurrency argument,
+and — importantly — the threat model with what this does **not** defend against
+(tail truncation, a full rewrite, trusted time) are in [`DESIGN.md`](DESIGN.md).
 
 ## Tests
 
 ```bash
-python3 -m unittest discover -s tests
+python3 -W error::ResourceWarning -m unittest discover -s tests
 ```
 
-Sixteen tests. Several of them go around the module and write to the database directly, to
-prove the rules live in the database and not only in the Python.
+Sixteen tests, and that's the command CI runs: `-W error::ResourceWarning` makes a leaked
+database connection fail the build. Several tests go around the module and write to the
+database directly, to prove the rules live in the database and not only in the Python.
 
 ## Limits
 
@@ -52,6 +58,8 @@ prove the rules live in the database and not only in the Python.
 - SQLite, one writer at a time. The pattern carries to Postgres with the same triggers and
   constraints.
 
-Standard library only, Python 3.9 or later.
+Standard library only, Python 3.10 or later.
 
-Joshua Vivo · [shadowvivo.com](https://shadowvivo.com)
+## Credits
+
+Architected and directed by [Joshua Vivo](https://github.com/joshuavivo) ([Shadow Vivo LLC](https://shadowvivo.com)), built with AI assistance (Claude). The design and the judgment are mine.
