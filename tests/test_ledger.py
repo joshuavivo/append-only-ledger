@@ -10,6 +10,7 @@ from ledger import Ledger, LedgerError, TamperError
 class AppendOnly(unittest.TestCase):
     def setUp(self):
         self.l = Ledger()
+        self.addCleanup(self.l.close)
         self.e = self.l.post("acct_1", 5000, "charge-1", "order 1")
 
     def test_update_is_refused_by_the_database(self):
@@ -26,6 +27,7 @@ class AppendOnly(unittest.TestCase):
 class Reversals(unittest.TestCase):
     def setUp(self):
         self.l = Ledger()
+        self.addCleanup(self.l.close)
         self.e = self.l.post("acct_1", 5000, "charge-1")
 
     def test_reversal_zeroes_the_balance_and_keeps_both_rows(self):
@@ -60,6 +62,7 @@ class Reversals(unittest.TestCase):
 class Idempotency(unittest.TestCase):
     def setUp(self):
         self.l = Ledger()
+        self.addCleanup(self.l.close)
 
     def test_retry_with_the_same_key_writes_once(self):
         a = self.l.post("acct_1", 5000, "charge-1")
@@ -77,6 +80,7 @@ class Idempotency(unittest.TestCase):
 class Amounts(unittest.TestCase):
     def test_floats_bools_and_zero_are_refused(self):
         l = Ledger()
+        self.addCleanup(l.close)
         for bad in (49.99, True, 0, "5000"):
             with self.assertRaises(LedgerError):
                 l.post("acct_1", bad, f"k-{bad!r}")
@@ -86,6 +90,7 @@ class Amounts(unittest.TestCase):
 class TamperEvidence(unittest.TestCase):
     def test_clean_chain_verifies(self):
         l = Ledger()
+        self.addCleanup(l.close)
         e = l.post("acct_1", 5000, "charge-1")
         l.reverse(e["id"], "reverse-1")
         l.post("acct_2", 1200, "charge-2")
@@ -93,6 +98,7 @@ class TamperEvidence(unittest.TestCase):
 
     def test_edit_after_removing_the_triggers_is_detected(self):
         l = Ledger()
+        self.addCleanup(l.close)
         l.post("acct_1", 5000, "charge-1")
         l.post("acct_1", 700, "charge-2")
         l.db.execute("DROP TRIGGER entries_no_update")
@@ -102,6 +108,7 @@ class TamperEvidence(unittest.TestCase):
 
     def test_deleted_middle_row_is_detected(self):
         l = Ledger()
+        self.addCleanup(l.close)
         for i in range(3):
             l.post("acct_1", 100, f"charge-{i}")
         l.db.execute("DROP TRIGGER entries_no_delete")
@@ -113,6 +120,7 @@ class TamperEvidence(unittest.TestCase):
 class Reconcile(unittest.TestCase):
     def setUp(self):
         self.l = Ledger()
+        self.addCleanup(self.l.close)
         e = self.l.post("acct_1", 5000, "charge-1")
         self.l.post("acct_1", 700, "charge-2")
         self.l.reverse(e["id"], "refund-1")
