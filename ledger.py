@@ -70,6 +70,18 @@ class Ledger:
         self.db.execute("PRAGMA foreign_keys = ON")
         self.db.executescript(SCHEMA)
 
+    def close(self):
+        """Close the underlying connection. Also usable as a context manager:
+        `with Ledger(path) as ledger: ...` closes it on exit."""
+        self.db.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+        return False
+
     def post(self, account, amount_cents, idempotency_key, memo=""):
         """Record a new entry. Positive credits the account, negative debits it."""
         return self._append(account, amount_cents, None, idempotency_key, memo)
