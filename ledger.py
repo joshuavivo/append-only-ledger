@@ -147,7 +147,9 @@ class Ledger:
         try:
             seen = self.db.execute("SELECT * FROM entries WHERE idempotency_key = ?", (key,)).fetchone()
             if seen is not None:
-                same = (seen["account"], seen["amount_cents"], seen["reverses"]) == (account, amount_cents, reverses)
+                # Every field the caller supplies is part of "the same request", memo included:
+                # a key reused for a different order must be refused, not answered with the first row.
+                same = (seen["account"], seen["amount_cents"], seen["reverses"], seen["memo"]) == (account, amount_cents, reverses, memo)
                 self.db.execute("ROLLBACK")
                 if same:
                     return dict(seen)  # a retry of the same request: return the first result, write nothing

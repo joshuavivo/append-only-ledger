@@ -76,6 +76,13 @@ class Idempotency(unittest.TestCase):
             self.l.post("acct_1", 9000, "charge-1")
         self.assertEqual(self.l.balance("acct_1"), 5000)
 
+    def test_same_key_with_a_different_memo_is_refused(self):
+        first = self.l.post("acct_1", 5000, "charge-1", memo="order 1")
+        self.assertEqual(self.l.post("acct_1", 5000, "charge-1", memo="order 1")["id"], first["id"])
+        with self.assertRaises(LedgerError):
+            self.l.post("acct_1", 5000, "charge-1", memo="order 2")
+        self.assertEqual([e["memo"] for e in self.l.entries()], ["order 1"])
+
 
 class Amounts(unittest.TestCase):
     def test_floats_bools_and_zero_are_refused(self):
