@@ -109,12 +109,12 @@ class Ledger:
 
     def verify(self):
         """Recompute the hash chain. Returns the number of rows checked, or raises TamperError."""
-        prev, count, last_id = GENESIS, 0, 0
+        prev, count = GENESIS, 0
         for r in self.db.execute("SELECT * FROM entries ORDER BY id"):
             expected = _hash(prev, r["account"], r["amount_cents"], r["reverses"], r["idempotency_key"], r["memo"], r["created_at"])
             if r["prev_hash"] != prev or r["hash"] != expected:
                 raise TamperError(f"entry {r['id']} does not match its hash")
-            prev, count, last_id = r["hash"], count + 1, r["id"]
+            prev, count = r["hash"], count + 1
         return count
 
     def reconcile(self, statement, account=None):
