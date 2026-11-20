@@ -1,0 +1,8 @@
+# No third-party Python dependencies (standard library only), so the only thing
+# to keep current is the Actions the CI uses. Weekly PRs, same CI gate as any change.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
