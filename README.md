@@ -60,7 +60,7 @@ and — importantly — the threat model with what this does **not** defend agai
 python3 -W error::ResourceWarning -m unittest discover -s tests
 ```
 
-Sixteen tests, and that's the command CI runs: `-W error::ResourceWarning` makes a leaked
+Nineteen tests, and that's the command CI runs: `-W error::ResourceWarning` makes a leaked
 database connection fail the build. Several tests go around the module and write to the
 database directly, to prove the rules live in the database and not only in the Python.
 

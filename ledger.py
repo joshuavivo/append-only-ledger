@@ -52,6 +52,10 @@ class LedgerError(Exception):
     """A request the ledger refuses."""
 
 
+class LedgerBusy(LedgerError):
+    """Another writer held the write lock for longer than the ledger's timeout. Nothing was written; retry."""
+
+
 class TamperError(Exception):
     """The stored rows no longer match their hash chain."""
 
@@ -64,8 +68,9 @@ def _hash(prev_hash, account, amount_cents, reverses, key, memo, created_at):
 
 
 class Ledger:
-    def __init__(self, path=":memory:"):
-        self.db = sqlite3.connect(path, isolation_level=None)
+    def __init__(self, path=":memory:", timeout=5.0):
+        """timeout is how many seconds a write waits for another writer's lock before LedgerBusy."""
+        self.db = sqlite3.connect(path, isolation_level=None, timeout=timeout)
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA foreign_keys = ON")
         self.db.executescript(SCHEMA)
@@ -104,12 +109,12 @@ class Ledger:
 
     def verify(self):
         """Recompute the hash chain. Returns the number of rows checked, or raises TamperError."""
-        prev, count, last_id = GENESIS, 0, 0
+        prev, count = GENESIS, 0
         for r in self.db.execute("SELECT * FROM entries ORDER BY id"):
             expected = _hash(prev, r["account"], r["amount_cents"], r["reverses"], r["idempotency_key"], r["memo"], r["created_at"])
             if r["prev_hash"] != prev or r["hash"] != expected:
                 raise TamperError(f"entry {r['id']} does not match its hash")
-            prev, count, last_id = r["hash"], count + 1, r["id"]
+            prev, count = r["hash"], count + 1
         return count
 
     def reconcile(self, statement, account=None):
@@ -143,11 +148,18 @@ class Ledger:
         if not account or not key:
             raise LedgerError("account and idempotency_key are required")
         # IMMEDIATE takes the write lock before reading the chain tip, so two writers cannot chain off the same row.
-        self.db.execute("BEGIN IMMEDIATE")
+        try:
+            self.db.execute("BEGIN IMMEDIATE")
+        except sqlite3.OperationalError as e:
+            if "locked" not in str(e):
+                raise
+            raise LedgerBusy("another writer is holding the ledger; nothing was written, retry the request") from e
         try:
             seen = self.db.execute("SELECT * FROM entries WHERE idempotency_key = ?", (key,)).fetchone()
             if seen is not None:
-                same = (seen["account"], seen["amount_cents"], seen["reverses"]) == (account, amount_cents, reverses)
+                # Every field the caller supplies is part of "the same request", memo included:
+                # a key reused for a different order must be refused, not answered with the first row.
+                same = (seen["account"], seen["amount_cents"], seen["reverses"], seen["memo"]) == (account, amount_cents, reverses, memo)
                 self.db.execute("ROLLBACK")
                 if same:
                     return dict(seen)  # a retry of the same request: return the first result, write nothing

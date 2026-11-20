@@ -2,7 +2,27 @@
 
 Notable changes. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [0.2.0]
+## [0.3.0] - 2026-11-20
+
+Fixes found by an independent review.
+
+### Changed
+- A reused idempotency key now compares `memo` too. Posting `"order 2"` under the
+  key already used for `"order 1"` raises `LedgerError` instead of silently
+  returning the `"order 1"` row. An exact retry still returns the first row.
+- A writer that times out waiting for another writer's lock raises `LedgerBusy`
+  (a `LedgerError`) with nothing written, instead of a raw
+  `sqlite3.OperationalError`. `Ledger(path, timeout=...)` sets the wait.
+
+### Added
+- Two-connection concurrency tests: concurrent writers produce one unforked chain,
+  and a blocked writer gets `LedgerBusy` and succeeds on retry. `DESIGN.md` cites
+  them and states what they do not cover.
+
+### Removed
+- An unused variable in `verify()`.
+
+## [0.2.0] - 2026-11-19
 
 ### Added
 - `Ledger.close()` and context-manager support (`with Ledger(path) as ledger:`) so
@@ -17,7 +37,7 @@ Notable changes. Format follows [Keep a Changelog](https://keepachangelog.com/en
 - CI now runs `python -W error::ResourceWarning`, turning a leaked database
   connection into a build failure; the tests close every connection they open.
 
-## [0.1.0]
+## [0.1.0] - 2026-11-15
 
 ### Added
 - Append-only ledger on SQLite: update/delete-refusing triggers, reversal mirroring,
