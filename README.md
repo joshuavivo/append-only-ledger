@@ -6,6 +6,23 @@ and what was done about it.
 
 I built this to show how I think money records should be kept, in one small file of Python and SQLite.
 
+## Why payment records specifically
+
+Money records get read later by people who weren't there: a customer disputing a
+charge, a card network asking for evidence, an accountant closing the month, an
+auditor. Each of them asks the same question, "what happened, and when", and an
+edited row can't answer it. If a balance was wrong and someone fixed it in place,
+the history now says it was never wrong, and the fix is invisible. With reversals,
+the original charge, the mistake, the correction and the reason all stay on
+record, so a dispute is answered from the ledger instead of from someone's memory.
+It also makes a bug in the code that writes money show up as rows you can count,
+not as a balance that quietly drifted.
+
+For the same rule inside a webhook handler (signature check, exactly-once, a ledger
+row in the same Postgres transaction, dead letter), see the
+[payment-path example](https://github.com/joshuavivo/exactly-once-webhooks/tree/main/examples/payment-path)
+in exactly-once-webhooks.
+
 ## What it guarantees
 
 | Rule | Where it is enforced |
