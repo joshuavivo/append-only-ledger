@@ -52,6 +52,10 @@ class LedgerError(Exception):
     """A request the ledger refuses."""
 
 
+class LedgerBusy(LedgerError):
+    """Another writer held the write lock for longer than the ledger's timeout. Nothing was written; retry."""
+
+
 class TamperError(Exception):
     """The stored rows no longer match their hash chain."""
 
@@ -64,8 +68,9 @@ def _hash(prev_hash, account, amount_cents, reverses, key, memo, created_at):
 
 
 class Ledger:
-    def __init__(self, path=":memory:"):
-        self.db = sqlite3.connect(path, isolation_level=None)
+    def __init__(self, path=":memory:", timeout=5.0):
+        """timeout is how many seconds a write waits for another writer's lock before LedgerBusy."""
+        self.db = sqlite3.connect(path, isolation_level=None, timeout=timeout)
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA foreign_keys = ON")
         self.db.executescript(SCHEMA)
@@ -143,7 +148,12 @@ class Ledger:
         if not account or not key:
             raise LedgerError("account and idempotency_key are required")
         # IMMEDIATE takes the write lock before reading the chain tip, so two writers cannot chain off the same row.
-        self.db.execute("BEGIN IMMEDIATE")
+        try:
+            self.db.execute("BEGIN IMMEDIATE")
+        except sqlite3.OperationalError as e:
+            if "locked" not in str(e):
+                raise
+            raise LedgerBusy("another writer is holding the ledger; nothing was written, retry the request") from e
         try:
             seen = self.db.execute("SELECT * FROM entries WHERE idempotency_key = ?", (key,)).fetchone()
             if seen is not None:

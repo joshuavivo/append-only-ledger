@@ -60,6 +60,20 @@ hash and then both chain a new row off it (which would fork the chain). The read
 the tip, the hash computation, and the insert are one serialized transaction; on
 any error it rolls back and nothing is written.
 
+A writer that cannot get the lock waits up to the ledger's `timeout` (5 seconds by
+default), then raises `LedgerBusy`, a `LedgerError`, with nothing written. The
+request is safe to retry under the same idempotency key.
+
+Two tests in the `Concurrency` class exercise this with two connections to one
+database file. One releases two threads at once, each posting 50 entries, and
+checks that all 100 land and `verify()` passes over one unforked chain; with a
+plain deferred `BEGIN` in place of `BEGIN IMMEDIATE` it fails with
+`database is locked`. The other holds the lock from one connection and checks the
+second gets `LedgerBusy`, writes nothing, and succeeds on retry once the lock is
+free. These are tests of SQLite's locking on one machine, not a proof: they cover
+threads in one process, not separate processes or a network filesystem, where
+SQLite's locking is known to be unreliable.
+
 ## Threat model — what each layer stops, and what it doesn't
 
 | Threat | Defended by | Caveat |

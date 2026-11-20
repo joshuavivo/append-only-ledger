@@ -1,10 +1,12 @@
 import sqlite3
 import sys
+import tempfile
+import threading
 import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from ledger import Ledger, LedgerError, TamperError
+from ledger import Ledger, LedgerBusy, LedgerError, TamperError
 
 
 class AppendOnly(unittest.TestCase):
@@ -152,6 +154,53 @@ class Reconcile(unittest.TestCase):
         self.assertEqual(r["missing_in_statement"], [])
         self.assertEqual(r["difference_cents"], 0)
         self.assertEqual(self.l.entries(), before)
+
+
+class Concurrency(unittest.TestCase):
+    """Two connections to one database file, as two processes would have."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.path = str(Path(tmp.name) / "ledger.db")
+
+    def test_two_writers_never_fork_the_chain(self):
+        # Each thread posts through its own connection, released together by a barrier.
+        # With a plain (deferred) BEGIN instead of BEGIN IMMEDIATE, both writers read the
+        # tip under a shared lock and one fails with "database is locked" when it tries
+        # to write. verify() checks that the 100 rows form one unforked chain.
+        per_thread, errors = 50, []
+        start = threading.Barrier(2)
+
+        def writer(name):
+            try:
+                with Ledger(self.path) as ledger:
+                    start.wait()
+                    for i in range(per_thread):
+                        ledger.post("acct_1", 1, f"{name}-{i}")
+            except Exception as e:  # surfaced below; a thread cannot fail the test itself
+                errors.append(e)
+
+        threads = [threading.Thread(target=writer, args=(n,)) for n in ("a", "b")]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        self.assertEqual(errors, [])
+        with Ledger(self.path) as ledger:
+            self.assertEqual(ledger.verify(), 2 * per_thread)
+            self.assertEqual(ledger.balance("acct_1"), 2 * per_thread)
+
+    def test_a_writer_that_times_out_gets_a_clear_error_and_writes_nothing(self):
+        with Ledger(self.path) as holder, Ledger(self.path, timeout=0.05) as waiter:
+            holder.db.execute("BEGIN IMMEDIATE")  # another writer mid-transaction
+            with self.assertRaises(LedgerBusy):
+                waiter.post("acct_1", 5000, "charge-1")
+            holder.db.execute("ROLLBACK")
+            self.assertEqual(waiter.entries(), [])
+            waiter.post("acct_1", 5000, "charge-1")  # the retry goes through once the lock is free
+            self.assertEqual(waiter.balance("acct_1"), 5000)
 
 
 if __name__ == "__main__":
