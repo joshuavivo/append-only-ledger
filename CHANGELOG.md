@@ -2,6 +2,13 @@
 
 Notable changes. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Changed
+- Supported Python is now 3.11 or later, and CI tests 3.11 and 3.15. Python 3.10
+  reached end of life on 2026-10-01; CI no longer tests it, so the README no
+  longer claims it.
+
 ## [0.3.0] - 2026-11-20
 
 Fixes found by an independent review.
