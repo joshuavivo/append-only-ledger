@@ -202,6 +202,21 @@ class Concurrency(unittest.TestCase):
             waiter.post("acct_1", 5000, "charge-1")  # the retry goes through once the lock is free
             self.assertEqual(waiter.balance("acct_1"), 5000)
 
+    def test_a_commit_blocked_by_a_reader_gets_a_clear_error_and_writes_nothing(self):
+        # The write lock is free at BEGIN IMMEDIATE, but an open read on another connection
+        # keeps COMMIT from finishing. That timeout must also surface as LedgerBusy, not a raw
+        # sqlite3.OperationalError, and must leave nothing behind.
+        with Ledger(self.path) as reader, Ledger(self.path, timeout=0.05) as waiter:
+            reader.db.execute("BEGIN")
+            reader.db.execute("SELECT * FROM entries").fetchall()  # holds a shared lock
+            with self.assertRaises(LedgerBusy):
+                waiter.post("acct_1", 5000, "charge-1")
+            reader.db.execute("ROLLBACK")
+            self.assertEqual(waiter.entries(), [])
+            waiter.post("acct_1", 5000, "charge-1")  # the retry goes through once the reader is done
+            self.assertEqual(waiter.balance("acct_1"), 5000)
+            self.assertEqual(waiter.verify(), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

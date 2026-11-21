@@ -2,6 +2,14 @@
 
 Notable changes. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Fixed
+- A write blocked at `COMMIT` by an open read on another connection now raises
+  `LedgerBusy` with nothing written, like a write blocked at `BEGIN`. It used to
+  surface as a raw `sqlite3.OperationalError`, so 0.3.0's `LedgerBusy` covered only the
+  `BEGIN` case.
+
 ## [0.3.0] - 2026-11-20
 
 Fixes found by an independent review.

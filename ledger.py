@@ -53,7 +53,7 @@ class LedgerError(Exception):
 
 
 class LedgerBusy(LedgerError):
-    """Another writer held the write lock for longer than the ledger's timeout. Nothing was written; retry."""
+    """Another connection held the database lock (a writer, or a reader at COMMIT) for longer than the ledger's timeout. Nothing was written; retry."""
 
 
 class TamperError(Exception):
@@ -69,7 +69,7 @@ def _hash(prev_hash, account, amount_cents, reverses, key, memo, created_at):
 
 class Ledger:
     def __init__(self, path=":memory:", timeout=5.0):
-        """timeout is how many seconds a write waits for another writer's lock before LedgerBusy."""
+        """timeout is how many seconds a write waits on another connection's lock before LedgerBusy."""
         self.db = sqlite3.connect(path, isolation_level=None, timeout=timeout)
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA foreign_keys = ON")
@@ -181,6 +181,13 @@ class Ledger:
             raise LedgerError(str(e)) from None
         except LedgerError:
             raise
+        except sqlite3.OperationalError as e:
+            # COMMIT can also wait on a lock: an open read on another connection blocks it even
+            # though BEGIN IMMEDIATE succeeded. Same outcome as a busy BEGIN: roll back, nothing written.
+            self.db.execute("ROLLBACK")
+            if "locked" not in str(e):
+                raise
+            raise LedgerBusy("another connection is holding the ledger; nothing was written, retry the request") from e
         except Exception:
             self.db.execute("ROLLBACK")
             raise
