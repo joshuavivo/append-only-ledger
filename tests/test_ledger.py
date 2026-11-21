@@ -95,6 +95,25 @@ class Amounts(unittest.TestCase):
                 l.post("acct_1", bad, f"k-{bad!r}")
         self.assertEqual(l.entries(), [])
 
+    def test_blank_account_or_key_is_refused(self):
+        l = Ledger()
+        self.addCleanup(l.close)
+        for account, key in (("   ", "k-1"), ("acct_1", " "), (None, "k-2")):
+            with self.assertRaises(LedgerError):
+                l.post(account, 5000, key)
+        self.assertEqual(l.entries(), [])
+
+    def test_memo_and_reason_must_be_text(self):
+        # A None memo used to crash inside the hash with a TypeError instead of a LedgerError.
+        l = Ledger()
+        self.addCleanup(l.close)
+        with self.assertRaises(LedgerError):
+            l.post("acct_1", 5000, "charge-1", memo=None)
+        e = l.post("acct_1", 5000, "charge-2")
+        with self.assertRaises(LedgerError):
+            l.reverse(e["id"], "refund-2", reason=None)
+        self.assertEqual(len(l.entries()), 1)
+
 
 class TamperEvidence(unittest.TestCase):
     def test_clean_chain_verifies(self):

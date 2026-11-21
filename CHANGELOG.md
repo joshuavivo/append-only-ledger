@@ -9,6 +9,9 @@ Notable changes. Format follows [Keep a Changelog](https://keepachangelog.com/en
   `LedgerBusy` with nothing written, like a write blocked at `BEGIN`. It used to
   surface as a raw `sqlite3.OperationalError`, so 0.3.0's `LedgerBusy` covered only the
   `BEGIN` case.
+- A blank (whitespace-only) account or idempotency key, and a memo or reversal
+  reason that isn't text (for example `None`), are refused with `LedgerError`.
+  A `None` memo used to crash inside the hash with a `TypeError`.
 
 ## [0.3.0] - 2026-11-20
 

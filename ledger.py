@@ -145,8 +145,10 @@ class Ledger:
             raise LedgerError("amount_cents must be an integer number of minor units, never a float")
         if amount_cents == 0:
             raise LedgerError("amount_cents cannot be zero")
-        if not account or not key:
-            raise LedgerError("account and idempotency_key are required")
+        if not isinstance(account, str) or not account.strip() or not isinstance(key, str) or not key.strip():
+            raise LedgerError("account and idempotency_key are required and cannot be blank")
+        if not isinstance(memo, str):
+            raise LedgerError("memo (or a reversal's reason) must be text")
         # IMMEDIATE takes the write lock before reading the chain tip, so two writers cannot chain off the same row.
         try:
             self.db.execute("BEGIN IMMEDIATE")
