@@ -17,6 +17,9 @@ Notable changes. Format follows [Keep a Changelog](https://keepachangelog.com/en
 - `DESIGN.md` and README Limits now say the row id is not part of the hash, so a row
   renumbered after the triggers are dropped is not caught by `verify()`. The old
   wording ("any edit to a stored row is detectable") overstated it.
+- Supported Python is now 3.11 or later, and CI tests 3.11 and 3.15. Python 3.10
+  reached end of life in October 2026; CI no longer tests it, so the README no
+  longer claims it.
 
 ### Fixed
 - **`INSERT OR REPLACE` could overwrite a row.** SQLite resolves a REPLACE conflict by

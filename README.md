@@ -91,7 +91,7 @@ database directly, to prove the rules live in the database and not only in the P
 - SQLite, one writer at a time. The pattern carries to Postgres with the same triggers and
   constraints.
 
-Standard library only, Python 3.10 or later.
+Standard library only, Python 3.11 or later.
 
 ## Credits
 
