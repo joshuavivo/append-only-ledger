@@ -1,7 +1,11 @@
 # Append-only payments ledger
 
-A small ledger where money records are never edited and never deleted. A mistake is fixed by
-adding a reversal row that points at the original, so the history always shows what happened
+**When a customer disputes a charge, you have to show what happened.** An edited payment row
+can't: the history now says it was never wrong, the dispute gets argued from memory, and the
+accountant can't tell a bug from a correction.
+
+This is a small ledger where money records are never edited and never deleted. A mistake is fixed
+by adding a reversal row that points at the original, so the history always shows what happened
 and what was done about it.
 
 I built this to show how I think money records should be kept, in one small file of Python and SQLite.
@@ -34,7 +38,7 @@ in exactly-once-webhooks.
 | A key reused for a different request is refused | Checked inside the write transaction |
 | Amounts are whole minor units | Floats, booleans, strings and zero are refused |
 | Differences from an external statement are listed, never auto-fixed | `reconcile()` reports missing rows, amount mismatches and duplicates, and writes nothing |
-| Edits made after removing the triggers are detected | Each row stores a hash of itself and the previous row; `verify()` recomputes the chain |
+| Edits made after removing the triggers are detected | Each row stores a hash of itself and the previous row; `verify()` recomputes the chain. Rows cut off the end are the exception (see Limits) |
 
 ## Use
 
