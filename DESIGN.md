@@ -7,8 +7,9 @@ records, read the threat model before relying on any of it.
 ## The claim
 
 > Money rows are never edited or deleted; a mistake is corrected only by a reversal
-> that mirrors the original; a retried request is written once; and any edit to a
-> stored row is detectable afterwards.
+> that mirrors the original; a retried request is written once; and an edit to a
+> stored row's contents is detectable afterwards (its row number is not part of the
+> hash; see "What this does NOT defend against").
 
 Three independent layers enforce that, so a bug (or a hand) in one does not quietly
 defeat the whole thing.
@@ -94,10 +95,17 @@ SQLite's locking is known to be unreliable.
 | App code (or a bug) updating/deleting a row | Layer 1 triggers | — |
 | Raw SQL updating, deleting or `INSERT OR REPLACE`-ing a row, or posting an unbalanced reversal | Layer 1 triggers | Holds until someone `DROP`s the triggers |
 | Double-processing a retried webhook | Layer 2 idempotency key | — |
-| A row edited after the triggers are dropped | Layer 3 `verify()` | Detects, does not prevent |
+| A row's contents edited after the triggers are dropped | Layer 3 `verify()` | Detects, does not prevent |
+| A row renumbered after the triggers are dropped | — | Not detected: the row id isn't hashed |
 | A middle row deleted after triggers dropped | Layer 3 (chain breaks) | Detected |
 
 ### What this does NOT defend against (read this)
+
+- **Renumbering.** The hash covers each row's contents and the previous hash, not its
+  `id`. With the triggers dropped, changing a row's `id` (for example so a reversal no
+  longer points at the entry it reversed, which can then be reversed again) still
+  verifies. Putting `id` into the hash would close it, at the cost of re-hashing
+  existing ledgers.
 
 - **Tail truncation.** Cutting the newest rows off the end leaves a chain that still
   verifies — `verify()` has no independent record of how long the chain *should* be.

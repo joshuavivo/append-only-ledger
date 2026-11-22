@@ -73,6 +73,9 @@ database directly, to prove the rules live in the database and not only in the P
 - The hash chain detects an edited row or a row removed from the middle. It does not detect
   the newest rows being cut off the end. Catching that needs the latest hash stored somewhere
   the database owner cannot write, such as a separate log.
+- The hash covers each row's contents and the previous row's hash, not its row number. With
+  the triggers dropped, renumbering a row (for example detaching a reversal from the entry it
+  reverses) is not caught by `verify()`.
 - Someone with full write access to the file can rebuild the whole chain. The chain is tamper
   evidence against partial edits, not a substitute for access control and backups.
 - One currency per ledger. No double-entry accounts; this is a single-sided record of entries.

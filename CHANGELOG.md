@@ -4,6 +4,11 @@ Notable changes. Format follows [Keep a Changelog](https://keepachangelog.com/en
 
 ## [Unreleased]
 
+### Changed
+- `DESIGN.md` and README Limits now say the row id is not part of the hash, so a row
+  renumbered after the triggers are dropped is not caught by `verify()`. The old
+  wording ("any edit to a stored row is detectable") overstated it.
+
 ### Fixed
 - **`INSERT OR REPLACE` could overwrite a row.** SQLite resolves a REPLACE conflict by
   deleting the old row without firing `DELETE` triggers, so raw SQL could rewrite any
