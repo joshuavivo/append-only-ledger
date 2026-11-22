@@ -1,5 +1,8 @@
 # Append-only payments ledger
 
+[![tests](https://github.com/joshuavivo/append-only-ledger/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/joshuavivo/append-only-ledger/actions/workflows/tests.yml)
+[![license: MIT](https://img.shields.io/badge/license-MIT-informational)](LICENSE)
+
 **When a customer disputes a charge, you have to show what happened.** An edited payment row
 can't: the history now says it was never wrong, the dispute gets argued from memory, and the
 accountant can't tell a bug from a correction.

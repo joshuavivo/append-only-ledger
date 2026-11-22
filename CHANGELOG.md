@@ -5,6 +5,7 @@ Notable changes. Format follows [Keep a Changelog](https://keepachangelog.com/en
 ## [Unreleased]
 
 ### Changed
+- README badges at the top: live test status for `main` and the license.
 - `DESIGN.md` and README Limits now say the row id is not part of the hash, so a row
   renumbered after the triggers are dropped is not caught by `verify()`. The old
   wording ("any edit to a stored row is detectable") overstated it.
