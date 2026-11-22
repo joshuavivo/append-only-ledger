@@ -2,6 +2,33 @@
 
 Notable changes. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Changed
+- `DESIGN.md` and README Limits now say the row id is not part of the hash, so a row
+  renumbered after the triggers are dropped is not caught by `verify()`. The old
+  wording ("any edit to a stored row is detectable") overstated it.
+
+### Fixed
+- **`INSERT OR REPLACE` could overwrite a row.** SQLite resolves a REPLACE conflict by
+  deleting the old row without firing `DELETE` triggers, so raw SQL could rewrite any
+  row (and, with a recomputed hash, the newest row would still pass `verify()`). A new
+  `BEFORE INSERT` trigger refuses any colliding insert. Found by an outside review.
+- A write blocked at `COMMIT` by an open read on another connection now raises
+  `LedgerBusy` with nothing written, like a write blocked at `BEGIN`. It used to
+  surface as a raw `sqlite3.OperationalError`, so 0.3.0's `LedgerBusy` covered only the
+  `BEGIN` case.
+- A blank (whitespace-only) account or idempotency key, and a memo or reversal
+  reason that isn't text (for example `None`), are refused with `LedgerError`.
+  A `None` memo used to crash inside the hash with a `TypeError`.
+- Inputs the ledger can't store safely are refused with `LedgerError` instead of a raw
+  error: amounts beyond 10^15 minor units (2^63 used to raise `OverflowError`), text
+  with lone surrogates (`UnicodeEncodeError`), and accounts or keys padded with spaces,
+  which a new trigger also refuses for raw SQL. `DESIGN.md` now says exactly what raw
+  SQL's type affinity lets through.
+- A write interrupted mid-transaction (for example by Ctrl-C) now rolls back. It used to
+  leave the transaction open, so the next write failed.
+
 ## [0.3.0] - 2026-11-20
 
 Fixes found by an independent review.

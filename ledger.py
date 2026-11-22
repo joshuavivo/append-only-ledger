@@ -31,6 +31,27 @@ BEGIN SELECT RAISE(ABORT, 'ledger is append-only: rows cannot be updated'); END;
 CREATE TRIGGER IF NOT EXISTS entries_no_delete BEFORE DELETE ON entries
 BEGIN SELECT RAISE(ABORT, 'ledger is append-only: rows cannot be deleted'); END;
 
+-- Accounts and keys are compared as exact text, so "acct_1" and "acct_1 " would be two
+-- accounts. Refuse blank values, and values padded with spaces, tabs, line breaks or a
+-- non-breaking space, here too, not only in Python.
+CREATE TRIGGER IF NOT EXISTS entries_clean_text BEFORE INSERT ON entries
+WHEN trim(NEW.account, ' ' || char(9, 10, 11, 12, 13, 160)) = ''
+  OR NEW.account != trim(NEW.account, ' ' || char(9, 10, 11, 12, 13, 160))
+  OR trim(NEW.idempotency_key, ' ' || char(9, 10, 11, 12, 13, 160)) = ''
+  OR NEW.idempotency_key != trim(NEW.idempotency_key, ' ' || char(9, 10, 11, 12, 13, 160))
+BEGIN SELECT RAISE(ABORT, 'account and idempotency_key cannot be blank or padded with spaces'); END;
+
+-- INSERT OR REPLACE resolves a conflict by deleting the old row, and SQLite skips DELETE
+-- triggers for that unless recursive_triggers is on. Refuse any insert that would collide,
+-- before conflict resolution runs, so the guarantee holds on every connection.
+CREATE TRIGGER IF NOT EXISTS entries_no_replace BEFORE INSERT ON entries
+WHEN EXISTS (SELECT 1 FROM entries WHERE id = NEW.id OR idempotency_key = NEW.idempotency_key)
+BEGIN SELECT RAISE(ABORT, 'ledger is append-only: rows cannot be replaced'); END;
+
+CREATE TRIGGER IF NOT EXISTS entries_reversed_once BEFORE INSERT ON entries
+WHEN NEW.reverses IS NOT NULL AND EXISTS (SELECT 1 FROM entries WHERE reverses = NEW.reverses)
+BEGIN SELECT RAISE(ABORT, 'that entry has already been reversed'); END;
+
 CREATE TRIGGER IF NOT EXISTS reversal_must_mirror BEFORE INSERT ON entries
 WHEN NEW.reverses IS NOT NULL
 BEGIN
@@ -53,11 +74,16 @@ class LedgerError(Exception):
 
 
 class LedgerBusy(LedgerError):
-    """Another writer held the write lock for longer than the ledger's timeout. Nothing was written; retry."""
+    """Another connection held the database lock (a writer, or a reader at COMMIT) for longer than the ledger's timeout. Nothing was written; retry."""
 
 
 class TamperError(Exception):
     """The stored rows no longer match their hash chain."""
+
+
+# Bound on one entry: 10^15 minor units ($10 trillion). It keeps a single amount, and the
+# sum of thousands of them, inside SQLite's signed 64-bit integers.
+MAX_MINOR_UNITS = 10**15
 
 
 def _hash(prev_hash, account, amount_cents, reverses, key, memo, created_at):
@@ -69,7 +95,7 @@ def _hash(prev_hash, account, amount_cents, reverses, key, memo, created_at):
 
 class Ledger:
     def __init__(self, path=":memory:", timeout=5.0):
-        """timeout is how many seconds a write waits for another writer's lock before LedgerBusy."""
+        """timeout is how many seconds a write waits on another connection's lock before LedgerBusy."""
         self.db = sqlite3.connect(path, isolation_level=None, timeout=timeout)
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA foreign_keys = ON")
@@ -145,8 +171,18 @@ class Ledger:
             raise LedgerError("amount_cents must be an integer number of minor units, never a float")
         if amount_cents == 0:
             raise LedgerError("amount_cents cannot be zero")
-        if not account or not key:
-            raise LedgerError("account and idempotency_key are required")
+        if abs(amount_cents) > MAX_MINOR_UNITS:
+            raise LedgerError(f"amount_cents is out of range (at most {MAX_MINOR_UNITS:,} minor units)")
+        for name, value in (("account", account), ("idempotency_key", key)):
+            if not isinstance(value, str) or not value.strip() or value != value.strip():
+                raise LedgerError(f"{name} is required and cannot be blank or padded with spaces")
+        if not isinstance(memo, str):
+            raise LedgerError("memo (or a reversal's reason) must be text")
+        for value in (account, key, memo):
+            try:
+                value.encode("utf-8")
+            except UnicodeEncodeError:
+                raise LedgerError("text must be valid Unicode (no lone surrogates)") from None
         # IMMEDIATE takes the write lock before reading the chain tip, so two writers cannot chain off the same row.
         try:
             self.db.execute("BEGIN IMMEDIATE")
@@ -181,6 +217,13 @@ class Ledger:
             raise LedgerError(str(e)) from None
         except LedgerError:
             raise
-        except Exception:
+        except sqlite3.OperationalError as e:
+            # COMMIT can also wait on a lock: an open read on another connection blocks it even
+            # though BEGIN IMMEDIATE succeeded. Same outcome as a busy BEGIN: roll back, nothing written.
+            self.db.execute("ROLLBACK")
+            if "locked" not in str(e):
+                raise
+            raise LedgerBusy("another connection is holding the ledger; nothing was written, retry the request") from e
+        except BaseException:  # KeyboardInterrupt included: never leave the transaction open
             self.db.execute("ROLLBACK")
             raise

@@ -7,8 +7,9 @@ records, read the threat model before relying on any of it.
 ## The claim
 
 > Money rows are never edited or deleted; a mistake is corrected only by a reversal
-> that mirrors the original; a retried request is written once; and any edit to a
-> stored row is detectable afterwards.
+> that mirrors the original; a retried request is written once; and an edit to a
+> stored row's contents is detectable afterwards (its row number is not part of the
+> hash; see "What this does NOT defend against").
 
 Three independent layers enforce that, so a bug (or a hand) in one does not quietly
 defeat the whole thing.
@@ -16,6 +17,10 @@ defeat the whole thing.
 ## Layer 1 — the database refuses mutation (prevention)
 
 `BEFORE UPDATE` and `BEFORE DELETE` triggers `RAISE(ABORT)` on the `entries` table.
+A third, `BEFORE INSERT`, refuses any insert that collides with an existing row (same
+`id`, idempotency key or reversal target). Without it, `INSERT OR REPLACE` could overwrite
+a row: SQLite resolves that conflict by deleting the old row and does not fire `DELETE`
+triggers for it unless `recursive_triggers` is on.
 This is enforced in SQLite itself, so the rule holds even for code that bypasses
 this module and runs raw SQL — the tests prove it by issuing `UPDATE`/`DELETE`
 directly and asserting they're refused. A reversal is also checked by a
@@ -30,9 +35,14 @@ balance, even in raw SQL.
   refused (checked inside the write transaction).
 - `reverses` is `UNIQUE` and references `entries(id)`: an entry can be reversed at
   most once, and a reversal cannot itself be reversed.
-- `amount_cents` is `CHECK (typeof = 'integer' AND != 0)`: floats, booleans,
-  strings and zero never reach the table. Money is integer minor units, one
+- `amount_cents` is `CHECK (typeof = 'integer' AND != 0)`. Through the Python API,
+  floats, booleans, strings, zero and amounts beyond 10^15 minor units are refused
+  with `LedgerError`. Raw SQL goes through SQLite's type affinity first, so `'5000'`,
+  `49.0` and Python's `True` arrive as the integers 5000, 49 and 1 and pass the check;
+  a non-integer like `49.5` is still refused. Money is integer minor units, one
   currency per ledger.
+- Accounts and idempotency keys can't be blank or padded with spaces, in Python and in
+  a `BEFORE INSERT` trigger, so `"acct_1"` and `"acct_1 "` can't become two accounts.
 
 ## Layer 3 — the hash chain (tamper evidence)
 
@@ -62,15 +72,19 @@ any error it rolls back and nothing is written.
 
 A writer that cannot get the lock waits up to the ledger's `timeout` (5 seconds by
 default), then raises `LedgerBusy`, a `LedgerError`, with nothing written. The
-request is safe to retry under the same idempotency key.
+request is safe to retry under the same idempotency key. The lock can also be the
+hold-up at `COMMIT`: with SQLite's default rollback journal, an open read on another
+connection keeps a commit from finishing even after `BEGIN IMMEDIATE` succeeded. That
+wait ends the same way: `LedgerBusy`, rolled back, nothing written.
 
-Two tests in the `Concurrency` class exercise this with two connections to one
+Three tests in the `Concurrency` class exercise this with two connections to one
 database file. One releases two threads at once, each posting 50 entries, and
 checks that all 100 land and `verify()` passes over one unforked chain; with a
 plain deferred `BEGIN` in place of `BEGIN IMMEDIATE` it fails with
 `database is locked`. The other holds the lock from one connection and checks the
 second gets `LedgerBusy`, writes nothing, and succeeds on retry once the lock is
-free. These are tests of SQLite's locking on one machine, not a proof: they cover
+free. The third holds an open read instead and checks the same outcome at `COMMIT`.
+These are tests of SQLite's locking on one machine, not a proof: they cover
 threads in one process, not separate processes or a network filesystem, where
 SQLite's locking is known to be unreliable.
 
@@ -79,12 +93,19 @@ SQLite's locking is known to be unreliable.
 | Threat | Defended by | Caveat |
 |---|---|---|
 | App code (or a bug) updating/deleting a row | Layer 1 triggers | — |
-| Raw SQL updating/deleting, or posting an unbalanced reversal | Layer 1 triggers | Holds until someone `DROP`s the triggers |
+| Raw SQL updating, deleting or `INSERT OR REPLACE`-ing a row, or posting an unbalanced reversal | Layer 1 triggers | Holds until someone `DROP`s the triggers |
 | Double-processing a retried webhook | Layer 2 idempotency key | — |
-| A row edited after the triggers are dropped | Layer 3 `verify()` | Detects, does not prevent |
+| A row's contents edited after the triggers are dropped | Layer 3 `verify()` | Detects, does not prevent |
+| A row renumbered after the triggers are dropped | — | Not detected: the row id isn't hashed |
 | A middle row deleted after triggers dropped | Layer 3 (chain breaks) | Detected |
 
 ### What this does NOT defend against (read this)
+
+- **Renumbering.** The hash covers each row's contents and the previous hash, not its
+  `id`. With the triggers dropped, changing a row's `id` (for example so a reversal no
+  longer points at the entry it reversed, which can then be reversed again) still
+  verifies. Putting `id` into the hash would close it, at the cost of re-hashing
+  existing ledgers.
 
 - **Tail truncation.** Cutting the newest rows off the end leaves a chain that still
   verifies — `verify()` has no independent record of how long the chain *should* be.
