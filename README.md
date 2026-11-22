@@ -36,7 +36,7 @@ in exactly-once-webhooks.
 | An entry can be reversed once, and a reversal cannot be reversed | Unique constraint and trigger |
 | A retried request writes once | Unique idempotency key; the retry gets the first result back |
 | A key reused for a different request is refused | Checked inside the write transaction |
-| Amounts are whole minor units | Floats, booleans, strings and zero are refused |
+| Amounts are whole minor units | Floats, booleans, strings, zero and amounts beyond 10^15 are refused |
 | Differences from an external statement are listed, never auto-fixed | `reconcile()` reports missing rows, amount mismatches and duplicates, and writes nothing |
 | Edits made after removing the triggers are detected | Each row stores a hash of itself and the previous row; `verify()` recomputes the chain. Rows cut off the end are the exception (see Limits) |
 
@@ -64,7 +64,7 @@ and — importantly — the threat model with what this does **not** defend agai
 python3 -W error::ResourceWarning -m unittest discover -s tests
 ```
 
-Twenty-four tests, and that's the command CI runs: `-W error::ResourceWarning` makes a leaked
+Twenty-seven tests, and that's the command CI runs: `-W error::ResourceWarning` makes a leaked
 database connection fail the build. Several tests go around the module and write to the
 database directly, to prove the rules live in the database and not only in the Python.
 

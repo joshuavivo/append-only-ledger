@@ -31,6 +31,16 @@ BEGIN SELECT RAISE(ABORT, 'ledger is append-only: rows cannot be updated'); END;
 CREATE TRIGGER IF NOT EXISTS entries_no_delete BEFORE DELETE ON entries
 BEGIN SELECT RAISE(ABORT, 'ledger is append-only: rows cannot be deleted'); END;
 
+-- Accounts and keys are compared as exact text, so "acct_1" and "acct_1 " would be two
+-- accounts. Refuse blank values, and values padded with spaces, tabs, line breaks or a
+-- non-breaking space, here too, not only in Python.
+CREATE TRIGGER IF NOT EXISTS entries_clean_text BEFORE INSERT ON entries
+WHEN trim(NEW.account, ' ' || char(9, 10, 11, 12, 13, 160)) = ''
+  OR NEW.account != trim(NEW.account, ' ' || char(9, 10, 11, 12, 13, 160))
+  OR trim(NEW.idempotency_key, ' ' || char(9, 10, 11, 12, 13, 160)) = ''
+  OR NEW.idempotency_key != trim(NEW.idempotency_key, ' ' || char(9, 10, 11, 12, 13, 160))
+BEGIN SELECT RAISE(ABORT, 'account and idempotency_key cannot be blank or padded with spaces'); END;
+
 -- INSERT OR REPLACE resolves a conflict by deleting the old row, and SQLite skips DELETE
 -- triggers for that unless recursive_triggers is on. Refuse any insert that would collide,
 -- before conflict resolution runs, so the guarantee holds on every connection.
@@ -69,6 +79,11 @@ class LedgerBusy(LedgerError):
 
 class TamperError(Exception):
     """The stored rows no longer match their hash chain."""
+
+
+# Bound on one entry: 10^15 minor units ($10 trillion). It keeps a single amount, and the
+# sum of thousands of them, inside SQLite's signed 64-bit integers.
+MAX_MINOR_UNITS = 10**15
 
 
 def _hash(prev_hash, account, amount_cents, reverses, key, memo, created_at):
@@ -156,10 +171,18 @@ class Ledger:
             raise LedgerError("amount_cents must be an integer number of minor units, never a float")
         if amount_cents == 0:
             raise LedgerError("amount_cents cannot be zero")
-        if not isinstance(account, str) or not account.strip() or not isinstance(key, str) or not key.strip():
-            raise LedgerError("account and idempotency_key are required and cannot be blank")
+        if abs(amount_cents) > MAX_MINOR_UNITS:
+            raise LedgerError(f"amount_cents is out of range (at most {MAX_MINOR_UNITS:,} minor units)")
+        for name, value in (("account", account), ("idempotency_key", key)):
+            if not isinstance(value, str) or not value.strip() or value != value.strip():
+                raise LedgerError(f"{name} is required and cannot be blank or padded with spaces")
         if not isinstance(memo, str):
             raise LedgerError("memo (or a reversal's reason) must be text")
+        for value in (account, key, memo):
+            try:
+                value.encode("utf-8")
+            except UnicodeEncodeError:
+                raise LedgerError("text must be valid Unicode (no lone surrogates)") from None
         # IMMEDIATE takes the write lock before reading the chain tip, so two writers cannot chain off the same row.
         try:
             self.db.execute("BEGIN IMMEDIATE")

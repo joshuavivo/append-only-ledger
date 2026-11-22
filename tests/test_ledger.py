@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import ledger
 from ledger import Ledger, LedgerBusy, LedgerError, TamperError
 
 
@@ -133,6 +134,42 @@ class Amounts(unittest.TestCase):
             with self.assertRaises(LedgerError):
                 l.post(account, 5000, key)
         self.assertEqual(l.entries(), [])
+
+    def test_amounts_and_text_the_ledger_cannot_store_are_refused(self):
+        # These used to escape as raw OverflowError / UnicodeEncodeError.
+        l = Ledger()
+        self.addCleanup(l.close)
+        for bad in (2**63, -(2**63), ledger.MAX_MINOR_UNITS + 1):
+            with self.assertRaises(LedgerError):
+                l.post("acct_1", bad, f"k-{bad}")
+        for account, key, memo in (("acct_1", "k-a", "\ud800"), ("\ud800", "k-b", ""), ("acct_1", "\ud800", "")):
+            with self.assertRaises(LedgerError):
+                l.post(account, 5000, key, memo)
+        self.assertEqual(l.entries(), [])
+
+    def test_padded_account_or_key_is_refused_in_python_and_in_the_database(self):
+        # "acct_1" and "acct_1 " would otherwise be two different accounts.
+        l = Ledger()
+        self.addCleanup(l.close)
+        with self.assertRaises(LedgerError):
+            l.post("acct_1 ", 5000, "k-1")
+        with self.assertRaises(LedgerError):
+            l.post("acct_1", 5000, " k-2")
+        for account, key in (("acct_1 ", "k-3"), ("   ", "k-4"), ("acct_1", "")):
+            with self.assertRaises(sqlite3.IntegrityError):
+                l.db.execute(
+                    "INSERT INTO entries (account, amount_cents, idempotency_key, created_at, prev_hash, hash)"
+                    " VALUES (?, 5000, ?, 'x', 'x', 'x')", (account, key))
+        self.assertEqual(l.entries(), [])
+
+    def test_tabs_newlines_and_nonbreaking_spaces_count_as_padding_in_the_database(self):
+        l = Ledger()
+        self.addCleanup(l.close)
+        for account in ("acct_1" + chr(9), "acct_1" + chr(10), chr(160) + "acct_1"):
+            with self.assertRaises(sqlite3.IntegrityError):
+                l.db.execute(
+                    "INSERT INTO entries (account, amount_cents, idempotency_key, created_at, prev_hash, hash)"
+                    " VALUES (?, 5000, 'k', 'x', 'x', 'x')", (account,))
 
     def test_memo_and_reason_must_be_text(self):
         # A None memo used to crash inside the hash with a TypeError instead of a LedgerError.

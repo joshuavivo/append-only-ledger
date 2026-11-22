@@ -34,9 +34,14 @@ balance, even in raw SQL.
   refused (checked inside the write transaction).
 - `reverses` is `UNIQUE` and references `entries(id)`: an entry can be reversed at
   most once, and a reversal cannot itself be reversed.
-- `amount_cents` is `CHECK (typeof = 'integer' AND != 0)`: floats, booleans,
-  strings and zero never reach the table. Money is integer minor units, one
+- `amount_cents` is `CHECK (typeof = 'integer' AND != 0)`. Through the Python API,
+  floats, booleans, strings, zero and amounts beyond 10^15 minor units are refused
+  with `LedgerError`. Raw SQL goes through SQLite's type affinity first, so `'5000'`,
+  `49.0` and Python's `True` arrive as the integers 5000, 49 and 1 and pass the check;
+  a non-integer like `49.5` is still refused. Money is integer minor units, one
   currency per ledger.
+- Accounts and idempotency keys can't be blank or padded with spaces, in Python and in
+  a `BEFORE INSERT` trigger, so `"acct_1"` and `"acct_1 "` can't become two accounts.
 
 ## Layer 3 — the hash chain (tamper evidence)
 

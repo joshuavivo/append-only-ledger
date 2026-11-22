@@ -16,6 +16,11 @@ Notable changes. Format follows [Keep a Changelog](https://keepachangelog.com/en
 - A blank (whitespace-only) account or idempotency key, and a memo or reversal
   reason that isn't text (for example `None`), are refused with `LedgerError`.
   A `None` memo used to crash inside the hash with a `TypeError`.
+- Inputs the ledger can't store safely are refused with `LedgerError` instead of a raw
+  error: amounts beyond 10^15 minor units (2^63 used to raise `OverflowError`), text
+  with lone surrogates (`UnicodeEncodeError`), and accounts or keys padded with spaces,
+  which a new trigger also refuses for raw SQL. `DESIGN.md` now says exactly what raw
+  SQL's type affinity lets through.
 
 ## [0.3.0] - 2026-11-20
 
