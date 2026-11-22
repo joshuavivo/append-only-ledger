@@ -5,6 +5,10 @@ Notable changes. Format follows [Keep a Changelog](https://keepachangelog.com/en
 ## [Unreleased]
 
 ### Fixed
+- **`INSERT OR REPLACE` could overwrite a row.** SQLite resolves a REPLACE conflict by
+  deleting the old row without firing `DELETE` triggers, so raw SQL could rewrite any
+  row (and, with a recomputed hash, the newest row would still pass `verify()`). A new
+  `BEFORE INSERT` trigger refuses any colliding insert. Found by an outside review.
 - A write blocked at `COMMIT` by an open read on another connection now raises
   `LedgerBusy` with nothing written, like a write blocked at `BEGIN`. It used to
   surface as a raw `sqlite3.OperationalError`, so 0.3.0's `LedgerBusy` covered only the

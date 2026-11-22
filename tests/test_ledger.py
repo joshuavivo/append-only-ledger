@@ -26,6 +26,37 @@ class AppendOnly(unittest.TestCase):
         self.assertEqual(len(self.l.entries()), 1)
 
 
+class NoReplace(unittest.TestCase):
+    """INSERT OR REPLACE deletes the conflicting row without firing DELETE triggers."""
+
+    def setUp(self):
+        self.l = Ledger()
+        self.addCleanup(self.l.close)
+        self.l.post("acct_1", 5000, "charge-1", "order 1")
+        self.l.post("acct_1", 700, "charge-2", "order 2")
+
+    def replace(self, row_id, **changes):
+        row = dict(self.l.db.execute("SELECT * FROM entries WHERE id = ?", (row_id,)).fetchone())
+        row.update(changes)
+        cols = ", ".join(row)
+        self.l.db.execute(f"INSERT OR REPLACE INTO entries ({cols}) VALUES ({', '.join('?' * len(row))})", tuple(row.values()))
+
+    def test_replace_cannot_overwrite_a_row(self):
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.replace(1, amount_cents=1)
+        self.assertEqual(self.l.balance("acct_1"), 5700)
+
+    def test_replace_cannot_rewrite_the_newest_row_even_with_a_valid_hash(self):
+        # Rewriting the tip and recomputing its hash would otherwise pass verify().
+        from ledger import _hash
+        tip = dict(self.l.db.execute("SELECT * FROM entries WHERE id = 2").fetchone())
+        h = _hash(tip["prev_hash"], tip["account"], 1, tip["reverses"], tip["idempotency_key"], tip["memo"], tip["created_at"])
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.replace(2, amount_cents=1, hash=h)
+        self.assertEqual(self.l.balance("acct_1"), 5700)
+        self.assertEqual(self.l.verify(), 2)
+
+
 class Reversals(unittest.TestCase):
     def setUp(self):
         self.l = Ledger()
@@ -40,7 +71,7 @@ class Reversals(unittest.TestCase):
 
     def test_an_entry_can_be_reversed_only_once(self):
         self.l.reverse(self.e["id"], "reverse-1")
-        with self.assertRaises(LedgerError):
+        with self.assertRaisesRegex(LedgerError, "already been reversed"):
             self.l.reverse(self.e["id"], "reverse-2")
         self.assertEqual(self.l.balance("acct_1"), 0)
 

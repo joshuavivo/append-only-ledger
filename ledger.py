@@ -31,6 +31,17 @@ BEGIN SELECT RAISE(ABORT, 'ledger is append-only: rows cannot be updated'); END;
 CREATE TRIGGER IF NOT EXISTS entries_no_delete BEFORE DELETE ON entries
 BEGIN SELECT RAISE(ABORT, 'ledger is append-only: rows cannot be deleted'); END;
 
+-- INSERT OR REPLACE resolves a conflict by deleting the old row, and SQLite skips DELETE
+-- triggers for that unless recursive_triggers is on. Refuse any insert that would collide,
+-- before conflict resolution runs, so the guarantee holds on every connection.
+CREATE TRIGGER IF NOT EXISTS entries_no_replace BEFORE INSERT ON entries
+WHEN EXISTS (SELECT 1 FROM entries WHERE id = NEW.id OR idempotency_key = NEW.idempotency_key)
+BEGIN SELECT RAISE(ABORT, 'ledger is append-only: rows cannot be replaced'); END;
+
+CREATE TRIGGER IF NOT EXISTS entries_reversed_once BEFORE INSERT ON entries
+WHEN NEW.reverses IS NOT NULL AND EXISTS (SELECT 1 FROM entries WHERE reverses = NEW.reverses)
+BEGIN SELECT RAISE(ABORT, 'that entry has already been reversed'); END;
+
 CREATE TRIGGER IF NOT EXISTS reversal_must_mirror BEFORE INSERT ON entries
 WHEN NEW.reverses IS NOT NULL
 BEGIN

@@ -16,6 +16,10 @@ defeat the whole thing.
 ## Layer 1 — the database refuses mutation (prevention)
 
 `BEFORE UPDATE` and `BEFORE DELETE` triggers `RAISE(ABORT)` on the `entries` table.
+A third, `BEFORE INSERT`, refuses any insert that collides with an existing row (same
+`id`, idempotency key or reversal target). Without it, `INSERT OR REPLACE` could overwrite
+a row: SQLite resolves that conflict by deleting the old row and does not fire `DELETE`
+triggers for it unless `recursive_triggers` is on.
 This is enforced in SQLite itself, so the rule holds even for code that bypasses
 this module and runs raw SQL — the tests prove it by issuing `UPDATE`/`DELETE`
 directly and asserting they're refused. A reversal is also checked by a
@@ -83,7 +87,7 @@ SQLite's locking is known to be unreliable.
 | Threat | Defended by | Caveat |
 |---|---|---|
 | App code (or a bug) updating/deleting a row | Layer 1 triggers | — |
-| Raw SQL updating/deleting, or posting an unbalanced reversal | Layer 1 triggers | Holds until someone `DROP`s the triggers |
+| Raw SQL updating, deleting or `INSERT OR REPLACE`-ing a row, or posting an unbalanced reversal | Layer 1 triggers | Holds until someone `DROP`s the triggers |
 | Double-processing a retried webhook | Layer 2 idempotency key | — |
 | A row edited after the triggers are dropped | Layer 3 `verify()` | Detects, does not prevent |
 | A middle row deleted after triggers dropped | Layer 3 (chain breaks) | Detected |

@@ -31,7 +31,7 @@ in exactly-once-webhooks.
 
 | Rule | Where it is enforced |
 |---|---|
-| Rows cannot be updated or deleted | Database triggers, so it holds for any code that touches the table |
+| Rows cannot be updated, deleted or overwritten with `INSERT OR REPLACE` | Database triggers, so it holds for any code that touches the table |
 | A reversal must mirror its original: same account, opposite amount | Database trigger |
 | An entry can be reversed once, and a reversal cannot be reversed | Unique constraint and trigger |
 | A retried request writes once | Unique idempotency key; the retry gets the first result back |
@@ -64,7 +64,7 @@ and — importantly — the threat model with what this does **not** defend agai
 python3 -W error::ResourceWarning -m unittest discover -s tests
 ```
 
-Twenty-two tests, and that's the command CI runs: `-W error::ResourceWarning` makes a leaked
+Twenty-four tests, and that's the command CI runs: `-W error::ResourceWarning` makes a leaked
 database connection fail the build. Several tests go around the module and write to the
 database directly, to prove the rules live in the database and not only in the Python.
 
