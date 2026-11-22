@@ -21,6 +21,8 @@ Notable changes. Format follows [Keep a Changelog](https://keepachangelog.com/en
   with lone surrogates (`UnicodeEncodeError`), and accounts or keys padded with spaces,
   which a new trigger also refuses for raw SQL. `DESIGN.md` now says exactly what raw
   SQL's type affinity lets through.
+- A write interrupted mid-transaction (for example by Ctrl-C) now rolls back. It used to
+  leave the transaction open, so the next write failed.
 
 ## [0.3.0] - 2026-11-20
 

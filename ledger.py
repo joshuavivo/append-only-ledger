@@ -224,6 +224,6 @@ class Ledger:
             if "locked" not in str(e):
                 raise
             raise LedgerBusy("another connection is holding the ledger; nothing was written, retry the request") from e
-        except Exception:
+        except BaseException:  # KeyboardInterrupt included: never leave the transaction open
             self.db.execute("ROLLBACK")
             raise

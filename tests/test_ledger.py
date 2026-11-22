@@ -3,6 +3,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from unittest import mock
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -181,6 +182,21 @@ class Amounts(unittest.TestCase):
         with self.assertRaises(LedgerError):
             l.reverse(e["id"], "refund-2", reason=None)
         self.assertEqual(len(l.entries()), 1)
+
+
+class Interrupted(unittest.TestCase):
+    def test_an_interrupted_write_rolls_back_and_the_next_write_works(self):
+        # A KeyboardInterrupt mid-append used to leave the transaction open, so the next
+        # post failed with "cannot start a transaction within a transaction".
+        l = Ledger()
+        self.addCleanup(l.close)
+        with mock.patch("ledger._hash", side_effect=KeyboardInterrupt):
+            with self.assertRaises(KeyboardInterrupt):
+                l.post("acct_1", 5000, "charge-1")
+        self.assertFalse(l.db.in_transaction)
+        self.assertEqual(l.entries(), [])
+        l.post("acct_1", 5000, "charge-1")
+        self.assertEqual(l.verify(), 1)
 
 
 class TamperEvidence(unittest.TestCase):
