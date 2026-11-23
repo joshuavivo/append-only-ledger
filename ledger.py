@@ -86,6 +86,21 @@ class TamperError(Exception):
 MAX_MINOR_UNITS = 10**15
 
 
+def _check_anchor(anchor):
+    if (
+        not isinstance(anchor, dict)
+        or set(anchor) != {"entries", "hash"}
+        or isinstance(anchor["entries"], bool)
+        or not isinstance(anchor["entries"], int)
+        or anchor["entries"] < 0
+        or not isinstance(anchor["hash"], str)
+        or len(anchor["hash"]) != 64
+        or any(c not in "0123456789abcdef" for c in anchor["hash"])
+        or (anchor["entries"] == 0) != (anchor["hash"] == GENESIS)
+    ):
+        raise LedgerError('anchor must be {"entries": n, "hash": "<64 hex>"} as returned by anchor()')
+
+
 def _hash(prev_hash, account, amount_cents, reverses, key, memo, created_at):
     parts = [prev_hash, account, str(amount_cents), "" if reverses is None else str(reverses), key, memo, created_at]
     # Length-prefix each field so two different rows can never join to the same string.
@@ -133,15 +148,48 @@ class Ledger:
             return [dict(r) for r in self.db.execute("SELECT * FROM entries ORDER BY id")]
         return [dict(r) for r in self.db.execute("SELECT * FROM entries WHERE account = ? ORDER BY id", (account,))]
 
-    def verify(self):
-        """Recompute the hash chain. Returns the number of rows checked, or raises TamperError."""
+    def verify(self, anchor=None):
+        """Recompute the hash chain. Returns the number of rows checked, or raises TamperError.
+
+        The chain alone can't tell that the newest rows were cut off the end. Pass an anchor
+        (from anchor(), kept somewhere the database owner can't write) to catch that: the nth
+        entry (by position, not id) must still be there with the same hash. Rows added after it
+        are fine.
+        """
+        if anchor is not None:
+            _check_anchor(anchor)
         prev, count = GENESIS, 0
+        anchored = anchor is not None and anchor["entries"] == 0
         for r in self.db.execute("SELECT * FROM entries ORDER BY id"):
             expected = _hash(prev, r["account"], r["amount_cents"], r["reverses"], r["idempotency_key"], r["memo"], r["created_at"])
             if r["prev_hash"] != prev or r["hash"] != expected:
                 raise TamperError(f"entry {r['id']} does not match its hash")
             prev, count = r["hash"], count + 1
+            if anchor is not None and count == anchor["entries"]:
+                if r["hash"] != anchor["hash"]:
+                    raise TamperError(
+                        f"entry {count} of the chain (by position, not id) no longer matches the anchor: entries "
+                        "up to it were changed or replaced, or the anchor is from another ledger"
+                    )
+                anchored = True
+        if anchor is not None and not anchored:
+            raise TamperError(
+                f"the ledger has {count} entries, but the anchor was taken at {anchor['entries']} "
+                "(counted by position, not id): the newest entries were removed, or the anchor is from "
+                "another ledger"
+            )
         return count
+
+    def anchor(self):
+        """The current end of the chain: {"entries": n, "hash": hash of the nth entry}.
+
+        Store it outside this database, somewhere its owner can't rewrite (an append-only log,
+        write-once object storage, a message to someone else), then pass it to verify(). It is
+        plain JSON-safe data. Entries added after it are not covered until the next anchor.
+        It counts the rows: an O(n) read, though much cheaper than verify(), which hashes each row.
+        """
+        tip = self.db.execute("SELECT COUNT(*) AS n, (SELECT hash FROM entries ORDER BY id DESC LIMIT 1) AS h FROM entries").fetchone()
+        return {"entries": tip["n"], "hash": tip["h"] or GENESIS}
 
     def reconcile(self, statement, account=None):
         """Compare the ledger with an external statement (a bank or processor export).

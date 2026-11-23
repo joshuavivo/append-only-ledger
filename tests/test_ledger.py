@@ -229,6 +229,79 @@ class TamperEvidence(unittest.TestCase):
             l.verify()
 
 
+class Anchor(unittest.TestCase):
+    """The newest rows cut off the end, caught by an anchor kept outside the database."""
+
+    def setUp(self):
+        self.l = Ledger()
+        self.addCleanup(self.l.close)
+        for i in range(3):
+            self.l.post("acct_1", 100, f"charge-{i}")
+
+    def cut_tail(self, keep):
+        self.l.db.execute("DROP TRIGGER entries_no_delete")
+        self.l.db.execute("DELETE FROM entries WHERE id > ?", (keep,))
+
+    def test_the_chain_alone_cannot_see_a_cut_tail(self):
+        # The limit this fixes: every remaining row still chains correctly.
+        self.cut_tail(keep=2)
+        self.assertEqual(self.l.verify(), 2)
+
+    def test_a_cut_tail_is_caught_by_the_anchor(self):
+        anchor = self.l.anchor()
+        self.assertEqual(anchor["entries"], 3)
+        self.cut_tail(keep=2)
+        with self.assertRaisesRegex(TamperError, "newest entries were removed"):
+            self.l.verify(anchor)
+
+    def test_a_cut_tail_hidden_by_new_rows_is_caught(self):
+        anchor = self.l.anchor()
+        self.cut_tail(keep=1)
+        self.l.post("acct_1", 100, "charge-x")
+        self.l.post("acct_1", 100, "charge-y")
+        self.assertEqual(self.l.verify(), 3)  # same length, valid chain
+        with self.assertRaisesRegex(TamperError, "no longer matches the anchor"):
+            self.l.verify(anchor)
+
+    def test_rows_added_after_the_anchor_are_fine(self):
+        anchor = self.l.anchor()
+        self.l.post("acct_1", 100, "charge-later")
+        self.assertEqual(self.l.verify(anchor), 4)
+
+    def test_an_anchor_survives_a_json_round_trip_and_a_reopen(self):
+        import json
+        with tempfile.TemporaryDirectory() as d:
+            path = str(Path(d) / "ledger.db")
+            with Ledger(path) as l:
+                l.post("acct_1", 100, "charge-0")
+                stored = json.dumps(l.anchor())
+            with Ledger(path) as l:
+                self.assertEqual(l.verify(json.loads(stored)), 1)
+
+    def test_an_empty_ledger_has_a_valid_anchor(self):
+        with Ledger() as l:
+            anchor = l.anchor()
+            self.assertEqual(anchor, {"entries": 0, "hash": ledger.GENESIS})
+            self.assertEqual(l.verify(anchor), 0)
+
+    def test_a_malformed_anchor_is_refused(self):
+        good = self.l.anchor()
+        for bad in (
+            "not a dict",
+            {"entries": 3},
+            {**good, "entries": -1},
+            {**good, "entries": True},
+            {**good, "entries": 3.0},
+            {**good, "hash": "xyz"},
+            {**good, "hash": good["hash"][:-1]},
+            {**good, "hash": good["hash"].upper()},
+            {"entries": 0, "hash": good["hash"]},
+            {**good, "extra": 1},
+        ):
+            with self.assertRaises(LedgerError, msg=repr(bad)):
+                self.l.verify(bad)
+
+
 class Reconcile(unittest.TestCase):
     def setUp(self):
         self.l = Ledger()

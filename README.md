@@ -41,7 +41,7 @@ in exactly-once-webhooks.
 | A key reused for a different request is refused | Checked inside the write transaction |
 | Amounts are whole minor units | Floats, booleans, strings, zero and amounts beyond 10^15 are refused |
 | Differences from an external statement are listed, never auto-fixed | `reconcile()` reports missing rows, amount mismatches and duplicates, and writes nothing |
-| Edits made after removing the triggers are detected | Each row stores a hash of itself and the previous row; `verify()` recomputes the chain. Rows cut off the end are the exception (see Limits) |
+| Edits made after removing the triggers are detected | Each row stores a hash of itself and the previous row; `verify()` recomputes the chain. Rows cut off the end are caught only with an anchor kept outside the database (see Limits) |
 
 ## Use
 
@@ -53,13 +53,16 @@ charge = ledger.post("acct_1", 5000, idempotency_key="charge-1", memo="order 1")
 ledger.reverse(charge["id"], idempotency_key="reverse-1", reason="charged twice")
 ledger.balance("acct_1")   # 0, with both rows still on record
 ledger.verify()            # 2 rows checked
+anchor = ledger.anchor()   # {"entries": 2, "hash": ...}: store it outside this database
+ledger.verify(anchor)      # also fails if entries up to the anchor were cut off the end
 ledger.reconcile([("charge-1", 5000)])   # lists reverse-1 as missing from the statement
 ledger.close()             # or use `with Ledger("payments.db") as ledger: ...`
 ```
 
 How the three enforcement layers fit together, the write-path concurrency argument,
 and — importantly — the threat model with what this does **not** defend against
-(tail truncation, a full rewrite, trusted time) are in [`DESIGN.md`](DESIGN.md).
+(tail truncation without an anchor, renumbering, a full rewrite, trusted time) are in
+[`DESIGN.md`](DESIGN.md).
 
 ## Tests
 
@@ -67,15 +70,18 @@ and — importantly — the threat model with what this does **not** defend agai
 python3 -W error::ResourceWarning -m unittest discover -s tests
 ```
 
-Twenty-eight tests, and that's the command CI runs: `-W error::ResourceWarning` makes a leaked
+Thirty-five tests, and that's the command CI runs: `-W error::ResourceWarning` makes a leaked
 database connection fail the build. Several tests go around the module and write to the
 database directly, to prove the rules live in the database and not only in the Python.
 
 ## Limits
 
-- The hash chain detects an edited row or a row removed from the middle. It does not detect
-  the newest rows being cut off the end. Catching that needs the latest hash stored somewhere
-  the database owner cannot write, such as a separate log.
+- The hash chain detects an edited row or a row removed from the middle. On its own it does
+  not detect the newest rows being cut off the end. `anchor()` exports the end of the chain
+  (`{"entries": n, "hash": ...}`); kept somewhere the database owner cannot write (a separate
+  append-only log, write-once storage, another system), `verify(anchor)` catches a cut tail,
+  including one hidden by new rows appended in its place. Rows added after the last anchor are
+  not covered until the next one, so anchor often. This repo doesn't store anchors for you.
 - The hash covers each row's contents and the previous row's hash, not its row number. With
   the triggers dropped, renumbering a row (for example detaching a reversal from the entry it
   reverses) is not caught by `verify()`.
