@@ -98,6 +98,7 @@ SQLite's locking is known to be unreliable.
 | A row's contents edited after the triggers are dropped | Layer 3 `verify()` | Detects, does not prevent |
 | A row renumbered after the triggers are dropped | — | Not detected: the row id isn't hashed |
 | A middle row deleted after triggers dropped | Layer 3 (chain breaks) | Detected |
+| The newest rows cut off the end after triggers dropped | `verify(anchor)` with an anchor kept off the database | Detected for entries up to the last anchor; rows after it are not covered |
 
 ### What this does NOT defend against (read this)
 
@@ -107,16 +108,21 @@ SQLite's locking is known to be unreliable.
   verifies. Putting `id` into the hash would close it, at the cost of re-hashing
   existing ledgers.
 
-- **Tail truncation.** Cutting the newest rows off the end leaves a chain that still
-  verifies — `verify()` has no independent record of how long the chain *should* be.
-  The fix is to store the latest hash (and a count) somewhere the database owner
-  cannot rewrite: a separate append-only log, another system, or a periodically
-  published anchor. This is the single most important external control.
+- **Tail truncation without an anchor.** Cutting the newest rows off the end leaves a
+  chain that still verifies: `verify()` alone has no independent record of how long the
+  chain *should* be. `anchor()` exports that record (`{"entries": n, "hash": ...}`), and
+  `verify(anchor)` checks that the *n*th entry (by position, not id) is still there with
+  the same hash, which also catches a cut tail with new rows appended to hide it. The
+  anchor only helps if it is stored where the database owner can't rewrite it (a
+  separate append-only log, write-once storage, another system), and it covers entries
+  up to the moment it was taken. Storing and scheduling anchors is left to the
+  deployment. It remains the single most important external control.
 - **A full rewrite by someone with write access *and* the hashing code.** The chain
   is tamper *evidence*, not tamper *proofing*: anyone who can write the file and run
   `_hash` can recompute a consistent chain from genesis. It raises the cost and
   catches casual edits and partial corruption; it does not replace access control,
-  backups, and off-box anchoring.
+  backups, and off-box anchoring. An anchor taken before the rewrite does catch it,
+  because the rewritten chain no longer reaches the anchored hash.
 - **Trusted time.** `created_at` is the application's own UTC clock and is part of
   the hash, so a wrong clock is locked in. This is not a timestamping authority.
 - **Scale.** `balance()` and `verify()` are O(n) full scans; a large ledger wants

@@ -4,6 +4,14 @@ Notable changes. Format follows [Keep a Changelog](https://keepachangelog.com/en
 
 ## [Unreleased]
 
+### Added
+- **Anchors catch a cut tail.** `anchor()` returns the end of the chain as
+  `{"entries": n, "hash": ...}`, and `verify(anchor)` raises `TamperError` if entry *n* is
+  gone or has a different hash, so the newest rows being cut off the end (README Limit 1),
+  even with new rows appended to hide it, is now detectable. The anchor has to be kept
+  outside the database, and rows added after it are covered only by the next anchor.
+  7 tests; the existing 28 are unchanged.
+
 ### Changed
 - README badges at the top: live test status for `main` and the license.
 - `DESIGN.md` and README Limits now say the row id is not part of the hash, so a row
