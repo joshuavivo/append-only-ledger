@@ -14,7 +14,7 @@ Notable changes. Format follows [Keep a Changelog](https://keepachangelog.com/en
 - **`INSERT OR REPLACE` could overwrite a row.** SQLite resolves a REPLACE conflict by
   deleting the old row without firing `DELETE` triggers, so raw SQL could rewrite any
   row (and, with a recomputed hash, the newest row would still pass `verify()`). A new
-  `BEFORE INSERT` trigger refuses any colliding insert. Found by an outside review.
+  `BEFORE INSERT` trigger refuses any colliding insert. Found by an AI review.
 - A write blocked at `COMMIT` by an open read on another connection now raises
   `LedgerBusy` with nothing written, like a write blocked at `BEGIN`. It used to
   surface as a raw `sqlite3.OperationalError`, so 0.3.0's `LedgerBusy` covered only the
@@ -32,7 +32,7 @@ Notable changes. Format follows [Keep a Changelog](https://keepachangelog.com/en
 
 ## [0.3.0] - 2026-11-20
 
-Fixes found by an independent review.
+Fixes found by an AI review.
 
 ### Changed
 - A reused idempotency key now compares `memo` too. Posting `"order 2"` under the
